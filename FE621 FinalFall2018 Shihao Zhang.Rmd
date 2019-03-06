@@ -1,0 +1,698 @@
+---
+title: "FE621 FinalFall2018"
+author: "Shihao Zhang"
+date: "2018-12-12"
+output: 
+  pdf_document: 
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#Problem A.
+#Pricing basket options
+
+a&b.
+```{r}
+#Given the information
+A <- matrix(c(1,0.5,0.2,0.5,1,-0.4,0.2,-0.4,1),3,3)
+A #correlation matrix
+S0 <- c(100,101,98)
+mu <- c(0.03,0.06,0.02)
+sigma <- c(0.05,0.2,0.15)
+n <- 1000 #trials(number of simulated paths)
+m <- 100 #number of days
+dt <- 1/365 #one day sampling frequency
+
+#path simulation
+path <- function(S0,mu,sigma,corr,dt,m,n){
+  nassets <- length(S0)
+  nu <- mu - sigma * sigma/2
+  R <- chol(corr)
+  S <- array(1, dim=c(m+1, n, nassets))
+  for(i in 1:n)
+  {
+    x <- matrix(rnorm(m * nassets), ncol = nassets, nrow = m)
+    ep <- x %*% R
+    S[,i,] <- rbind(rep(1,nassets), apply(exp(matrix(nu*dt,nrow=m,ncol=nassets,byrow=TRUE) + 
+                                                (ep %*% diag(sigma)*sqrt(dt))), 2, function(x) cumprod(x)) ) %*% diag(S0)
+  }
+  return(S)
+}
+S <- path(S0,mu,sigma,A,dt,m,n)
+S[,1:5,1] #an example of 5 trials of Price Paths for Asset 1
+#Plot these 1000 sample paths
+matplot(S[,1:1000,1],type='l', xlab='days', ylab='Prices',
+        main='Selected Price Paths for Asset 1')
+matplot(S[,1:1000,2],type='l', xlab='days', ylab='Prices',
+        main='Selected Price Paths for Asset 2')
+matplot(S[,1:1000,3],type='l', xlab='days', ylab='Prices',
+        main='Selected Price Paths for Asset 3')
+```
+c.Basket options
+```{r}
+#Given the information
+A <- matrix(c(1,0.5,0.2,0.5,1,-0.4,0.2,-0.4,1),3,3)
+S0 <- c(100,101,98)
+mu <- c(0.03,0.06,0.02)
+sigma <- c(0.05,0.2,0.15)
+n <- 10^6 #trials
+m <- 100
+dt <- 1/365
+K <- 100
+#Apply Monte Carlo simulation
+Basket <- function(iscall,S0,mu,sigma,corr,dt,m,n){
+  begintime<-Sys.time()
+  if(iscall=="call"){cp <- 1} ##distinguish call and put option
+  if(iscall=="put"){cp <- (-1)}
+  
+  nassets <- length(S0)
+  nu <- mu - sigma * sigma/2
+  R <- chol(corr)
+  S <- array(1, dim=c(m+1, n, nassets))
+  for(i in 1:n)
+  {
+    x <- matrix(rnorm(m * nassets), ncol = nassets, nrow = m)
+    ep <- x %*% R
+    S[,i,] <- rbind(rep(1,nassets), apply(exp(matrix(nu*dt,nrow=m,ncol=nassets,byrow=TRUE) + 
+                                                (ep %*% diag(sigma)*sqrt(dt))), 2, function(x) cumprod(x)) ) %*% diag(S0)
+  }
+  #A vanilla basket option is simply a vanilla option on U(T)
+  U <- c()
+  for (i in 1:n) {
+    U[i] <- max(0,cp*(S[(m+1),i,1]*(1/3)+S[(m+1),i,2]*(1/3)
+                 +S[(m+1),i,3]*(1/3)-K))
+  }
+  U.avg <- mean(U)
+  #Confidence interval
+  upside.95 <- mean(U)+1.96*sd(U)/sqrt(n)
+  downside.95 <- mean(U)-1.96*sd(U)/sqrt(n)
+
+  endtime<-Sys.time()
+  timecost<-endtime-begintime
+  return(c(U.avg,upside.95,downside.95))
+}
+
+Basket.call <- Basket("call",S0,mu,sigma,A,dt,m,n)
+Basket.put <- Basket("put",S0,mu,sigma,A,dt,m,n)
+Basket.table <- cbind(Basket.call,Basket.put)
+row.names(Basket.table) <- c("vanilla basket option value",
+                             "95% Confidence interval upside",
+                             "95% Confidence interval downside")
+Basket.table #This result is obtained using 10^6 MC simulation
+```
+d.Exotic options
+(i)
+```{r}
+B <- 104 #barrier
+#Condition is if the asset 2 hits the barrier
+Basket.barrier1 <- function(iscall,B,S0,mu,sigma,corr,dt,m,n){
+  begintime<-Sys.time()
+  if(iscall=="call"){cp <- 1} ##distinguish call and put option
+  if(iscall=="put"){cp <- (-1)}
+  
+  nassets <- length(S0)
+  nu <- mu - sigma * sigma/2
+  R <- chol(corr)
+  S <- array(1, dim=c(m+1, n, nassets))
+  for(i in 1:n)
+  {
+    x <- matrix(rnorm(m * nassets), ncol = nassets, nrow = m)
+    ep <- x %*% R
+    S[,i,] <- rbind(rep(1,nassets), apply(exp(matrix(nu*dt,nrow=m,ncol=nassets,byrow=TRUE) + 
+                                                (ep %*% diag(sigma)*sqrt(dt))), 2, function(x) cumprod(x)) ) %*% diag(S0)
+  }
+  
+  max.asset2 <- apply(S[,,2],2,function(x)max(x))
+  payoff <- c()
+  for (i in 1:n) {
+    #hits the barrier
+    if(max.asset2[i]>B){
+      payoff[i] <- max(0,cp*(S[(m+1),i,1]*(1/3)+S[(m+1),i,2]*(1/3)
+                 +S[(m+1),i,3]*(1/3)-K))
+    }
+    #not hits the barrier
+    if(max.asset2[i]<=B){
+      payoff[i] <- 0
+    }
+  }
+  
+  payoff.avg <- mean(payoff)
+  #Confidence interval
+  upside.95 <- mean(payoff)+1.96*sd(payoff)/sqrt(n)
+  downside.95 <- mean(payoff)-1.96*sd(payoff)/sqrt(n)
+
+  endtime<-Sys.time()
+  timecost<-endtime-begintime
+  return(c(payoff.avg,upside.95,downside.95))
+}
+Basket.barrier.call1 <- Basket.barrier1("call",B,S0,mu,sigma,A,dt,m,n)
+Basket.barrier.put1 <- Basket.barrier1("put",B,S0,mu,sigma,A,dt,m,n)
+table41 <- cbind(Basket.barrier.call1,Basket.barrier.put1)
+row.names(table41) <- c("basket barrier option value",
+                             "95% Confidence interval upside",
+                             "95% Confidence interval downside")
+table41 #This result is obtained using 10^6 MC simulation
+```
+(ii)
+#
+Professor, for this problem I assume that the payoff of the option is (S2-K)+, instead of (S2^2-K)+, because S2^2 makes no sense, no option is paid square of the stock price.
+```{r}
+Basket.barrier2 <- function(iscall,B,S0,mu,sigma,corr,dt,m,n){
+  begintime<-Sys.time()
+  if(iscall=="call"){cp <- 1} ##distinguish call and put option
+  if(iscall=="put"){cp <- (-1)}
+  
+  nassets <- length(S0)
+  nu <- mu - sigma * sigma/2
+  R <- chol(corr)
+  S <- array(1, dim=c(m+1, n, nassets))
+  for(i in 1:n)
+  {
+    x <- matrix(rnorm(m * nassets), ncol = nassets, nrow = m)
+    ep <- x %*% R
+    S[,i,] <- rbind(rep(1,nassets), apply(exp(matrix(nu*dt,nrow=m,ncol=nassets,byrow=TRUE) + 
+                                                (ep %*% diag(sigma)*sqrt(dt))), 2, function(x) cumprod(x)) ) %*% diag(S0)
+  }
+  
+  max.asset2 <- apply(S[,,2],2,function(x)max(x))
+  max.asset3 <- apply(S[,,3],2,function(x)max(x))
+  payoff <- c()
+  for (i in 1:n) {
+    #Condition 1
+    if(max.asset2[i]<=max.asset3[i]){
+      payoff[i] <- max(0,cp*(S[(m+1),i,1]*(1/3)+S[(m+1),i,2]*(1/3)
+                 +S[(m+1),i,3]*(1/3)-K))
+    }
+    #Condition 2
+    if(max.asset2[i]>max.asset3[i]){
+      payoff[i] <- max(0,cp*(S[(m+1),i,2]-K))
+    }
+  }
+  
+  payoff.avg <- mean(payoff)
+  #Confidence interval
+  upside.95 <- mean(payoff)+1.96*sd(payoff)/sqrt(n)
+  downside.95 <- mean(payoff)-1.96*sd(payoff)/sqrt(n)
+
+  endtime<-Sys.time()
+  timecost<-endtime-begintime
+  return(c(payoff.avg,upside.95,downside.95))
+}
+Basket.barrier.call2 <- Basket.barrier2("call",B,S0,mu,sigma,A,dt,m,n)
+Basket.barrier.put2 <- Basket.barrier2("put",B,S0,mu,sigma,A,dt,m,n)
+table42 <- cbind(Basket.barrier.call2,Basket.barrier.put2)
+row.names(table42) <- c("basket barrier option value",
+                             "95% Confidence interval upside",
+                             "95% Confidence interval downside")
+table42 #This result is obtained using 10^6 MC simulation
+```
+(iii)
+```{r}
+Basket.barrier3 <- function(iscall,B,S0,mu,sigma,corr,dt,m,n){
+  begintime<-Sys.time()
+  if(iscall=="call"){cp <- 1} ##distinguish call and put option
+  if(iscall=="put"){cp <- (-1)}
+  
+  nassets <- length(S0)
+  nu <- mu - sigma * sigma/2
+  R <- chol(corr)
+  S <- array(1, dim=c(m+1, n, nassets))
+  for(i in 1:n)
+  {
+    x <- matrix(rnorm(m * nassets), ncol = nassets, nrow = m)
+    ep <- x %*% R
+    S[,i,] <- rbind(rep(1,nassets), apply(exp(matrix(nu*dt,nrow=m,ncol=nassets,byrow=TRUE) + 
+                                                (ep %*% diag(sigma)*sqrt(dt))), 2, function(x) cumprod(x)) ) %*% diag(S0)
+  }
+  
+  avg.asset2 <- apply(S[,,2],2,function(x)mean(x))
+  avg.asset3 <- apply(S[,,3],2,function(x)mean(x))
+  payoff <- c()
+  for (i in 1:n) {
+    #Condition 1
+    if(avg.asset2[i]<=avg.asset3[i]){
+      payoff[i] <- 0
+    }
+    #Condition 2
+    if(avg.asset2[i]>avg.asset3[i]){
+      payoff[i] <- max(0,cp*(avg.asset2[i]-K))
+    }
+  }
+  
+  payoff.avg <- mean(payoff)
+  #Confidence interval
+  upside.95 <- mean(payoff)+1.96*sd(payoff)/sqrt(n)
+  downside.95 <- mean(payoff)-1.96*sd(payoff)/sqrt(n)
+
+  endtime<-Sys.time()
+  timecost<-endtime-begintime
+  return(c(payoff.avg,upside.95,downside.95))
+}
+Basket.barrier.call3 <- Basket.barrier3("call",B,S0,mu,sigma,A,dt,m,n)
+Basket.barrier.put3 <- Basket.barrier3("put",B,S0,mu,sigma,A,dt,m,n)
+table43 <- cbind(Basket.barrier.call3,Basket.barrier.put3)
+row.names(table43) <- c("basket barrier option value",
+                             "95% Confidence interval upside",
+                             "95% Confidence interval downside")
+table43 #This result is obtained using 10^6 MC simulation
+```
+
+
+
+
+#Problem B.
+#Principal Component Analysis
+
+1.Download daily prices,Construct the corresponding matrix of standardized returns.
+```{r}
+library(quantmod)
+library(lubridate)
+DJI <- get(getSymbols("^DJI", from="2013-12-13", to="2018-12-13"))
+Date <- time(DJI) #Date vector
+plot(DJI$DJI.Adjusted) #  Dow Jones Industrial Average for the last 5 years
+
+#Download components of DJIA stock price
+ticker <- c("WMT","DIS","CAT","XOM","IBM",
+            "UNH","HD","INTC","AXP","MRK",
+            "UTX","MMM","CVX","CSCO","AAPL",
+            "MCD","KO","V","WBA","JNJ",
+            "PFE","MSFT","PG","JPM","VZ",
+            "DWDP","GS","BA","NKE","TRV")
+#1~5
+WMT.P <- get(getSymbols("WMT", from="2013-12-13", to="2018-12-13"))
+WMT <- WMT.P$WMT.Close
+DIS.P <- get(getSymbols("DIS", from="2013-12-13", to="2018-12-13"))
+DIS <- DIS.P$DIS.Close
+CAT.P <- get(getSymbols("CAT", from="2013-12-13", to="2018-12-13"))
+CAT <-CAT.P$CAT.Close
+XOM.P <- get(getSymbols("XOM", from="2013-12-13", to="2018-12-13"))
+XOM <-XOM.P$XOM.Close
+IBM.P <- get(getSymbols("IBM", from="2013-12-13", to="2018-12-13"))
+IBM <-IBM.P$IBM.Close
+#6~10
+UNH.P <- get(getSymbols("UNH", from="2013-12-13", to="2018-12-13"))
+UNH <- UNH.P$UNH.Close
+HD.P <- get(getSymbols("HD", from="2013-12-13", to="2018-12-13"))
+HD <- HD.P$HD.Close
+INTC.P <- get(getSymbols("INTC", from="2013-12-13", to="2018-12-13"))
+INTC <- INTC.P$INTC.Close
+AXP.P <- get(getSymbols("AXP", from="2013-12-13", to="2018-12-13"))
+AXP <- AXP.P$AXP.Close
+MRK.P <- get(getSymbols("MRK", from="2013-12-13", to="2018-12-13"))
+MRK <- MRK.P$MRK.Close
+#11~15
+UTX.P <- get(getSymbols("UTX", from="2013-12-13", to="2018-12-13"))
+UTX <- UTX.P$UTX.Close
+MMM.P <- get(getSymbols("MMM", from="2013-12-13", to="2018-12-13"))
+MMM <- MMM.P$MMM.Close
+CVX.P <- get(getSymbols("CVX", from="2013-12-13", to="2018-12-13"))
+CVX <- CVX.P$CVX.Close
+CSCO.P <- get(getSymbols("CSCO", from="2013-12-13", to="2018-12-13"))
+CSCO <- CSCO.P$CSCO.Close
+AAPL.P <- get(getSymbols("AAPL", from="2013-12-13", to="2018-12-13"))
+AAPL <- AAPL.P$AAPL.Close
+#16~20
+MCD.P <- get(getSymbols("MCD", from="2013-12-13", to="2018-12-13"))
+MCD <- MCD.P$MCD.Close
+KO.P <- get(getSymbols("KO", from="2013-12-13", to="2018-12-13"))
+KO <- KO.P$KO.Close
+V.P <- get(getSymbols("V", from="2013-12-13", to="2018-12-13"))
+V <- V.P$V.Close
+WBA.P <- get(getSymbols("WBA", from="2013-12-13", to="2018-12-13"))
+WBA <- WBA.P$WBA.Close
+JNJ.P <- get(getSymbols("JNJ", from="2013-12-13", to="2018-12-13"))
+JNJ <- JNJ.P$JNJ.Close
+#21~25
+PFE.P <- get(getSymbols("PFE", from="2013-12-13", to="2018-12-13"))
+PFE <- PFE.P$PFE.Close
+MSFT.P <- get(getSymbols("MSFT", from="2013-12-13", to="2018-12-13"))
+MSFT <- MSFT.P$MSFT.Close
+PG.P <- get(getSymbols("PG", from="2013-12-13", to="2018-12-13"))
+PG <- PG.P$PG.Close
+JPM.P <- get(getSymbols("JPM", from="2013-12-13", to="2018-12-13"))
+JPM <- JPM.P$JPM.Close
+VZ.P <- get(getSymbols("VZ", from="2013-12-13", to="2018-12-13"))
+VZ <- VZ.P$VZ.Close
+#26~30
+DWDP.P <- get(getSymbols("DWDP", from="2013-12-13", to="2018-12-13"))
+DWDP <- DWDP.P$DWDP.Close
+GS.P <- get(getSymbols("GS", from="2013-12-13", to="2018-12-13"))
+GS <- GS.P$GS.Close
+BA.P <- get(getSymbols("BA", from="2013-12-13", to="2018-12-13"))
+BA <- BA.P$BA.Close
+NKE.P <- get(getSymbols("NKE", from="2013-12-13", to="2018-12-13"))
+NKE <- NKE.P$NKE.Close
+TRV.P <- get(getSymbols("TRV", from="2013-12-13", to="2018-12-13"))
+TRV <- TRV.P$TRV.Close
+
+#Now combine the data
+#components of DJIA
+DJIA <- cbind(WMT,DIS,CAT,XOM,IBM,
+            UNH,HD,INTC,AXP,MRK,
+            UTX,MMM,CVX,CSCO,AAPL,
+            MCD,KO,V,WBA,JNJ,
+            PFE,MSFT,PG,JPM,VZ,
+            DWDP,GS,BA,NKE,TRV)
+T <- nrow(DJIA)
+T #1258 days
+N <- ncol(DJIA)
+N #30 components stock
+DJIA <- as.data.frame(DJIA)
+#Construct matrix of standardized returns
+#daily log return R
+R <- matrix(NA,nrow = nrow(DJIA),ncol = ncol(DJIA))
+R[1,] <- 0
+for (j in 1:ncol(DJIA)) {
+  for (i in 2:nrow(DJIA)) {
+    R[i,j] <- log(DJIA[i,j]/DJIA[i-1,j])
+  }
+}
+#daily mean return&std
+options(scipen = 200,digits=6) #do not use Scientific notation
+Rmean <- apply(R,2,mean)
+Std <- c()
+for (i in 1:30) {
+  Std[i] <- sqrt(sum((R[,i]-Rmean[i])^2)/T)
+}
+#matrix of standardized returns
+Y <- matrix(NA,nrow = nrow(DJIA),ncol = ncol(DJIA))
+for (j in 1:N) {
+  for (i in 1:T) {
+    Y[i,j] <- (R[i,j]-Rmean[j])/Std[j]
+  }
+}
+colnames(Y) <- ticker
+head(Y)
+```
+2.Calculate the sample correlation matrix
+```{r}
+C <- cor(Y)
+head(C) #sample correlation matrix
+```
+3.Calculate the eigenvalues and eigenvectors
+```{r}
+decomposition <- eigen(C)
+eigenvalues <- decomposition$values
+eigenvectors <- decomposition$vectors
+head(eigenvalues)
+head(eigenvectors)
+#graph the eigenvalues
+plot(1:length(eigenvalues),eigenvalues, col="blue",
+     xlab="Number of Eigenvalues", ylab="Eigenvalues Value")
+#What percent of the trace is explained by summing the first
+#5 eigenvalues
+percentoftrace <- sum(eigenvalues[1:5])/sum(eigenvalues)
+percentoftrace
+#This means 57.095% of the trace is explained the first 5 eigenvalues.
+```
+4.Calculate the sample mean and sample standard deviation of the factor F
+```{r}
+#use the first eigenvalue as lambda1 and the first 30*1 eigenvector
+Ft <- as.matrix(R)%*%(eigenvectors[,1]/Std)/sqrt(eigenvalues[1])
+mean(Ft)
+sd(Ft)
+```
+5.Why F and the particular market index might be related
+```{r}
+#Download DIA
+DIA.P <- get(getSymbols("DIA", from="2013-12-13", to="2018-12-13"))
+plot(DIA.P$DIA.Close) #Dow Jones Industrial Average ETF
+plot(DJI$DJI.Adjusted) #  Dow Jones Industrial Average for the last 5 years
+DIA <- DIA.P$DIA.Close
+DIA <- as.matrix(DIA)
+#Calculate standardized return for DIA
+#daily log return R.DIA
+R.DIA <- matrix(NA,nrow = nrow(DIA),ncol=1)
+R.DIA[1,1] <- 0
+for (j in 1:ncol(DIA)) {
+  for (i in 2:nrow(DIA)) {
+    R.DIA[i,j] <- log(DIA[i,j]/DIA[i-1,j])
+  }
+}
+#daily mean return&std of DIA
+R.DIAmean <- apply(R.DIA,2,mean)
+Std.DIA <- sqrt(sum((R.DIA-R.DIAmean)^2)/T)
+#standardized returns of DIA
+sdreturn.DIA <- (R.DIA-R.DIAmean)/Std.DIA
+#Linear Regression
+lm <- lm(sdreturn.DIA~Ft)
+summary(lm)
+```
+#Comments:
+Multiple R-squared and Adjusted R-squared are all both 0.975, which is very close to 1. This means that nearly 97.5% part of the relationship between standardized returns of DIA and Ft(the returns of the portfolio) can be explained by this model. Thus means the sd returns of DIA and portfolio are highly correlated. Also, from the figure we know that DJIA and ETF for DJIA are almost identical. Thats why F and the particular market index might be related.
+
+6.Consider the 5 eigenportfolios
+```{r}
+#the 5 eigenportfolios(factors)
+Ft1 <- as.matrix(R)%*%(eigenvectors[,1]/Std)/sqrt(eigenvalues[1])
+Ft2 <- as.matrix(R)%*%(eigenvectors[,2]/Std)/sqrt(eigenvalues[2])
+Ft3 <- as.matrix(R)%*%(eigenvectors[,3]/Std)/sqrt(eigenvalues[3])
+Ft4 <- as.matrix(R)%*%(eigenvectors[,4]/Std)/sqrt(eigenvalues[4])
+Ft5 <- as.matrix(R)%*%(eigenvectors[,5]/Std)/sqrt(eigenvalues[5])
+#The standaradized return r should be Y as we calculated in problem 1.
+#Y
+#Rmean
+#Std
+
+#Run a regression with the 5 factors and obtain the parameters beta[sk]
+beta <- NULL
+for (i in 1:30) {
+  lm2 <- lm(Y[,i]~ 0+Ft1+Ft2+Ft3+Ft4+Ft5) #the regression intercept should be zero
+  beta <- cbind(beta,lm2$coefficients[1:5])
+  colnames(beta)[i] <- ticker[i]
+}
+row.names(beta) <- c("betaFt1","betaFt2","betaFt3","betaFt4","betaFt5")
+beta #parameters
+
+#Calculate the return of a sample portfolio equally weighted in its components.
+#First step,generating the path
+sampleportfolio <- vector("numeric",length = 30)
+sampleportfolio7days <- vector("numeric",length = 30)
+sampleportfoliopath <- NULL
+sampleportfoliopath7days <- NULL
+for (i in 1:10000) {
+  for (j in 1:30) {
+    sampleR <- matrix(Rmean[j],10,1)+
+      Std[j]*(matrix(rt(10*5,df=3.5),10,5))%*%(beta[,j])+
+      Std[j]*sqrt(1-sum(beta[,j]^2))*matrix(rt(10,df=3.5),10,1)
+    sampleportfolio[j] <- prod(1+sampleR[1:10,])
+    sampleportfolio7days[j] <- prod(1+sampleR[1:7,])
+  }
+  sampleportfoliopath <- rbind(sampleportfoliopath,sampleportfolio)
+  sampleportfoliopath7days <- rbind(sampleportfoliopath7days,sampleportfolio7days)
+}
+#Second step,calculate the return of portfolio equally weighted in its components
+#Assuming principal is $1 and all equally weighted
+Returnsampleportfoliopath <- sampleportfoliopath%*%matrix(1/30,30,1)
+#histgram of Final 10 days return
+hist(Returnsampleportfoliopath,main="Return of a sample portfolio equally weighted (Principal=$1)")
+summary(Returnsampleportfoliopath)
+#Calculate one week 99% VAR(7days)
+Returnsampleportfoliopath7days <- sampleportfoliopath7days%*%matrix(1/30,30,1)
+var.99 <- mean(Returnsampleportfoliopath7days) - quantile(Returnsampleportfoliopath7days,0.01)
+var.99
+#one week CVAR(7days)
+cvar.99 <- mean(Returnsampleportfoliopath7days)-sum(sort(Returnsampleportfoliopath7days)[1:100])/100
+cvar.99
+```
+
+
+#Bonus Problem
+According to research Paper,apply Re-scaled Range(R/S) method and 
+Detrended Fluctuation Analysis (DFA) method.
+For this problem, I download "EUR/USD exchange rate"" for intraday at 2018.12.03.
+And the TimeFrame is M1 (1 Minute Bar) Data.
+#Apply Re-scaled Range(R/S) method
+```{r}
+setwd("C:\\Users\\fukaeri\\Desktop\\Stevens\\18FALL\\FE621\\HW")
+rate <- read.csv("DAT_MT_EURUSD_M1_201812.csv",head=TRUE,sep=",") #EUR/USD exchange rate
+rate <- rate[419:1857,1:6]
+nrow(rate)
+head(rate)
+tail(rate)
+#Apply Re-scaled Range(R/S) method
+
+
+#Rearrange the data
+rate1 <- rate[,3:6]
+ratedata <- as.vector(t(as.matrix(rate1)))
+head(ratedata) #This is the EUR/USD exchange rate for intraday at 2018.12.03.
+#Step 1.
+M <- c()
+for (i in 1:(length(ratedata)-1)) {
+  M[i] <- log(ratedata[i+1]/ratedata[i])
+}
+NumberM <- length(M)
+NumberM
+#Step 2.
+#Since the total number of data observation is 5755
+#The only possible value for n is 5 or 1151
+
+#----------------------
+#Scenario 1
+#divided into 1151(m) sub-series of length 5(n)
+n <- 5
+m <- ceiling(NumberM/n)
+fill <- c(M,rep(mean(M),(n*m-NumberM)))
+L <- matrix(fill,nrow = n,ncol = m)
+#Step 3.
+Z <- apply(L,2,function(x)mean(x)) 
+#Step 4.
+C <- matrix(NA,nrow = n,ncol = m)
+for (j in 1:m) {
+  C[,j] <- L[,j]-Z[j]
+}
+CD <- apply(C,2,function(x)cumsum(x))
+#Step 5
+R <- c()
+for (i in 1:m) {
+  R[i] <- max(C[,i])-min(C[,i])
+}
+#Step 6
+Std <- c()
+for (i in 1:m) {
+  Std[i] <- sqrt((1/n)*sum(C^2))
+}
+#Step 7.
+R.S1 <- sum(R/Std)/m #R/S Ratio
+R.S1
+#----------------------
+#Scenario 2
+#divided into 5(m) sub-series of length 1151(n)
+n <- 1151
+m <- ceiling(NumberM/n)
+fill <- c(M,rep(mean(M),(n*m-NumberM)))
+L <- matrix(fill,nrow = n,ncol = m)
+#Step 3.
+Z <- apply(L,2,function(x)mean(x)) 
+#Step 4.
+C <- matrix(NA,nrow = n,ncol = m)
+for (j in 1:m) {
+  C[,j] <- L[,j]-Z[j]
+}
+CD <- apply(C,2,function(x)cumsum(x))
+#Step 5
+R <- c()
+for (i in 1:m) {
+  R[i] <- max(C[,i])-min(C[,i])
+}
+#Step 6
+Std <- c()
+for (i in 1:m) {
+  Std[i] <- sqrt((1/n)*sum(C^2))
+}
+#Step 7.
+R.S2 <- sum(R/Std)/m #R/S Ratio
+R.S2
+#----------------
+#Now fit linear regression
+#Step 8&9
+R.S <- c(R.S1,R.S2)
+R.Sn <- c(5,1151)
+lm <- lm(log(R.S)~log(R.Sn))
+summary(lm)
+lm$coefficients
+```
+We can see that H(beta) is 0.8195305.
+According to the paper, for data series with long memory effects, H would lie between 0.5 and 1, or elements of the observation are dependent. This means that our "EUR/USD exchange rate" data series for intraday at 2018.12.03 has long memory effects.
+
+#Apply Detrended Fluctuation Analysis (DFA) method
+```{r}
+yt <- cumsum(abs(M))
+yt.rev <- rev(yt)
+lengthyt <- length(yt)
+#Since the total number of data observation is 5755
+#The only possible value for n is 5 or 1151
+
+#----------------------
+#Scenario 1
+#divided into 1151(m) sub-series of length 5(n)
+n <- 5
+m <- ceiling(NumberM/n)
+L <- matrix(yt,nrow = n,ncol = m)
+Z <- apply(L,2,function(x)mean(x))
+#Fit a linear regression yn(t)
+t <- c(1:m)
+lmyn1 <- lm(Z~t)
+coef1<- lmyn1$coefficients
+ynt.1 <- coef1[2]*t+coef1[1]
+
+#Fit a reverse linear regression yn(t)
+L.rev <- matrix(yt.rev,nrow = n,ncol = m)
+Z.rev <- apply(L.rev,2,function(x)mean(x))
+lmyn1.rev <- lm(Z.rev~t)
+coef1.rev<- lmyn1.rev$coefficients
+ynt.1.rev <- coef1.rev[2]*t+coef1.rev[1]
+#Finally the root mean square fluctuation is calculated
+Fn1 <- sqrt((1/2*lengthyt)*sum((Z-ynt.1)^2+(Z.rev-ynt.1.rev)^2))
+Fn1
+
+#---------------------
+#Scenario 2
+#divided into 5(m) sub-series of length 1151(n)
+n <- 1151
+m <- ceiling(NumberM/n)
+L <- matrix(yt,nrow = n,ncol = m)
+Z <- apply(L,2,function(x)mean(x))
+#Fit a linear regression yn(t)
+t <- c(1:m)
+lmyn1 <- lm(Z~t)
+coef1<- lmyn1$coefficients
+ynt.1 <- coef1[2]*t+coef1[1]
+
+#Fit a reverse linear regression yn(t)
+L.rev <- matrix(yt.rev,nrow = n,ncol = m)
+Z.rev <- apply(L.rev,2,function(x)mean(x))
+lmyn1.rev <- lm(Z.rev~t)
+coef1.rev<- lmyn1.rev$coefficients
+ynt.1.rev <- coef1.rev[2]*t+coef1.rev[1]
+#Finally the root mean square fluctuation is calculated
+Fn2 <- sqrt((1/2*lengthyt)*sum((Z-ynt.1)^2+(Z.rev-ynt.1.rev)^2))
+Fn2
+#----------------
+#Now fit linear regression between F(n) and n
+Fn <- c(Fn1,Fn2)
+Fn.n <- c(1151,5)
+lm.Fn <- lm(log(Fn)~log(Fn.n))
+summary(lm.Fn)
+lm.Fn$coefficients
+```
+We can see that the slope is 0.5142304, which indicates that data series is with long-range power law correlations.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,567 @@
+---
+title: "FE621 HW2"
+author: "Shihao Zhang"
+date: "2018-09-30"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+Problem 1: Binomial/Trinomial Tree Basics
+```{r}
+#1.Using additive binomiall tree
+#Calculate the values of the European Call and put option
+#The difference between call and put option is the strike price,
+#I use a factor cp which represent 1 or -1, in that way
+#to calculate both options.
+Binomial_tree <- function(isCall, isAmerican, K, Tm, S0, sig, r=0.0192,
+                          N=200)
+  {
+  #Precompute constants
+  dt <-  Tm/N
+  v <-  r-0.5*sig^2
+  u <-  sqrt(sig^2*dt+(v*dt)^2) #dxu
+  d <- -u
+  p <- 0.5+0.5*(v*dt/u) #probability
+  disc <- exp(-r*dt) #discount factor
+  M <- N+1
+  cp <- ifelse(isCall, 1, -1) #factor cp with 1 or -1
+  
+  #Intialize asset prices
+  V = S = matrix(0, nrow = M, ncol = M, dimnames = list(
+    paste("State", 1:(N+1), sep = ""), paste("T=",0:N, sep = "")))
+  S[1,1] <- S0
+  for (j in 2:M) {
+    S[1,j] <- S[1,j-1]*exp(u)
+    for (i in 2:j) {
+      S[i,j] <- S[i-1,j-1]*exp(d)
+    }
+  }
+  
+  #Intialize option values at maturity
+  for (j in 1:M) {
+    V[M-j+1,M] <- max(0, cp*(S[M-j+1,M]-K))
+  }
+  
+  #Step backwards through the tree
+  for (j in (M-1):1) {
+    for (i in 1:j) {
+      V[i,j] <- disc*(p*V[i,j+1]+(1-p)*V[i+1,j+1])
+      if(isAmerican){
+        V[i,j] <- max(V[i,j],cp*(S[i,j]-K))
+      }
+    }
+  }
+  #Return the price
+  return(V[1,1])
+}
+Binomial_tree(isCall = T,isAmerican = F, K=100, Tm=1, S0=100, sig=0.2,
+              r=0.06,N=3)
+#Here I use the same parameter in figure 2.11 in textbook to check the model
+#And I obtain the same result as 11.5920
+```
+2.Download Option prices
+I choose AMZN's options. And the expiry date is 2018-10-19,2018-11-02,2018-10-26,separately.
+```{r}
+library(TTR)
+library(quantmod)
+Aequity=function(symbol){
+  A_equity <- getSymbols(symbol,src="yahoo",from="2018-09-28",to="2018-10-03",auto.assign = FALSE)
+}
+AMZN_price <- Aequity("AMZN")
+A_price <- AMZN_price$AMZN.Adjusted[3]
+AM1=getOptionChain("AMZN",Exp = '2018-10-19',src = "yahoo",auto.assign = FALSE)#Expiry 2018-10-19 #Expire in 17 days
+AM2=getOptionChain("AMZN",Exp = '2018-11-02',src = "yahoo",auto.assign = FALSE)#Expiry 2018-11-02 #Expire in 31 days
+AM3=getOptionChain("AMZN",Exp = '2018-10-26',src = "yahoo",auto.assign = FALSE)#Expiry 2018-10-26 #Expire in 24 days
+
+# Black-Scholes Option Value
+BSmodel <- function(S0, Sigma, t, K, r, optionType){
+  d1 = (log(S0/K) + (r + (Sigma^2)/2) * t)/(Sigma * sqrt(t))
+  d2 = d1 - Sigma * sqrt(t)
+  if(optionType == 'call'){ 
+    call = S0 * pnorm(d1) - K * exp(-r * t) * pnorm(d2) 
+    return(call)
+  }else if(optionType == "put"){
+    put = K * exp(-r * t) * pnorm(-d2) - S0 * pnorm(-d1)
+    return(put)
+  }
+}
+#Implement the Bisection method
+vrange=c(0,1)
+t1=0
+bisection=function(f, vrange, tol){
+  while((vrange[2]-vrange[1]) >= tol){
+    x=0.5*(vrange[1]+vrange[2])
+if(f(x)*f(vrange[2])>0)
+  {
+  vrange[2]=x
+}else if(f(x)*f(vrange[2])<0){
+  vrange[1]=x
+}
+  t1=1+t1
+}
+return(x)
+}
+
+# Using bisection and BS model
+# Calculate the implied volatility for AM_option1
+r <- 0.0216 #the risk free rate
+AMcall1=AM1$calls$Strike[1:20]
+AMimpcall1=AMimpcall2=AMimpcall3=AMimput1=AMimput2=AMimput3=c()
+# Call
+for(i in 1:length(AMcall1)){
+  AMvolc1 = function(sigma){
+    BSmodel(A_price, sigma, 17/252,AMcall1[i], r, "call") - 0.5 * (AM1$calls$Bid[i] +AM1$calls$Ask[i])
+  }
+  AMimpcall1[i] = bisection(AMvolc1, vrange, 1e-2)
+}
+#Put
+AMput1=AM1$puts$Strike[1:20]
+for(i in 1:length(AMput1)){
+  AMvolp1 = function(sigma){
+    BSmodel(A_price, sigma, 17/252,AMput1[i], r, "put") - 0.5 * (AM1$puts$Bid[i] + AM1$puts$Ask[i])
+  }
+  AMimput1[i] = bisection(AMvolp1, vrange, 1e-2)
+}
+
+# Second Option
+AMcall2=AM2$calls$Strike[1:20]
+
+# Call
+for(i in 1:length(AMcall2)){
+  AMvolc2 = function(sigma){
+    BSmodel(A_price, sigma, 31/252,AMcall2[i], r, "call") - 0.5 * (AM2$calls$Bid[i] + AM2$calls$Ask[i])
+  }
+  AMimpcall2[i] = bisection(AMvolc2, vrange, 1e-6)
+}
+
+#Put
+AMput2=AM2$puts$Strike[1:20]
+for(i in 1:length(AMput2)){
+  AMvolp2 = function(sigma){
+    BSmodel(A_price, sigma, 31/252,AMput2[i], r, "put") - 0.5 * (AM2$puts$Bid[i] + AM2$puts$Ask[i])
+  }
+  AMimput2[i] = bisection(AMvolp2, vrange, 1e-6)
+}
+
+# Third Option
+
+AMcall3=AM3$calls$Strike[1:20]
+
+# Call
+for(i in 1:length(AMcall3)){
+  AMvolc3 = function(sigma){
+    BSmodel(A_price, sigma, 24/252,AMcall3[i], r, "call") - 0.5 * (AM3$calls$Bid[i] + AM3$calls$Ask[i])
+  }
+  AMimpcall3[i] = bisection(AMvolc3, vrange, 1e-6)
+}
+
+#Put
+AMput3=AM3$puts$Strike[1:20]
+for(i in 1:length(AMput3)){
+  AMvolp3 = function(sigma){
+    BSmodel(A_price, sigma, 24/252,AMput3[i], r, "put") - 0.5 * (AM3$puts$Bid[i] + AM3$puts$Ask[i])
+  }
+  AMimput3[i] = bisection(AMvolp3, vrange, 1e-6)
+}
+
+
+# Using BS Model and Binomial tree calculating option price
+TTM1=17/252
+TTM2=31/252
+TTM3=24/252
+
+# By BS model
+r <- 0.0216 #the risk free rate
+Acall1=Acall2=Acall3=Aput1=Aput2=Aput3=c()
+# First AMZN Option
+for (i in 1:length(AMcall1)){
+  Acall1[i] = BSmodel(A_price, AMimpcall1[i], TTM1, AMcall1[i], r, "call")
+}
+
+for (i in 1:length(AMput1)){
+  Aput1[i] = BSmodel(A_price, AMimput1[i], TTM1, AMput1[i], r, "put")
+}
+#Second AMZN Option
+for (i in 1:length(AMcall2)){
+  Acall2[i] = BSmodel(A_price, AMimpcall2[i], TTM2, AMcall2[i], r, "call")
+}
+
+for (i in 1:length(AMput2)){
+  Aput2[i] = BSmodel(A_price, AMimput2[i], TTM2, AMput2[i], r, "put")
+}
+#Third Amzn Option
+for (i in 1:length(AMcall3)){
+  Acall3[i] = BSmodel(A_price, AMimpcall3[i], TTM3, AMcall3[i], r, "call")
+}
+
+for (i in 1:length(AMput3)){
+  Aput3[i] = BSmodel(A_price, AMimput3[i], TTM3, AMput3[i], r, "put")
+}
+
+#By Binomial Tree
+r <- 0.0216 #the risk free rate
+N <- 200
+BiAcall1=BiAcall2=BiAcall3=BiAput1=BiAput2=BiAput3=c() #Names Options by Binomial
+# first option
+for (i in 1:length(AMcall1)){
+  BiAcall1[i] = Binomial_tree(isCall=T, isAmerican=F, AMcall1[i], TTM1, A_price, AMimpcall1[i], r,N)
+}
+for (i in 1:length(AMput1)){
+  BiAput1[i] = Binomial_tree(isCall=F, isAmerican=F, AMput1[i], TTM1, A_price, AMimput1[i], r,N)
+}
+#Second option
+for (i in 1:length(AMcall2)){
+  BiAcall2[i] = Binomial_tree(isCall=T, isAmerican=F, AMcall2[i], TTM2, A_price, AMimpcall2[i], r,N)
+}
+for (i in 1:length(AMput2)){
+  BiAput2[i] = Binomial_tree(isCall=F, isAmerican=F, AMput2[i], TTM2, A_price, AMimput2[i], r,N)
+}
+#Third option
+for (i in 1:length(AMcall3)){
+  BiAcall3[i] = Binomial_tree(isCall=T, isAmerican=F, AMcall3[i], TTM3, A_price, AMimpcall3[i], r,N)
+}
+for (i in 1:length(AMput3)){
+  BiAput3[i] = Binomial_tree(isCall=F, isAmerican=F, AMput3[i], TTM3, A_price, AMimput3[i], r,N)
+}
+#Combine in a table
+# Create a table to compare call and put by two methods
+table_call <- data.frame(Acall1, BiAcall1,Acall2,BiAcall2,Acall3,BiAcall3)
+table_put <- data.frame(Aput1,BiAput1,Aput2,BiAput2,Aput3,BiAput3)
+table_call
+table_put#A is calculated by BSmodel, BiA is calculated by Binomiall Tree
+```
+3.plot the absolute error
+```{r}
+N <-  seq(50,400,by=50) #steps
+error1 = c() #Calculate error
+for (i in 1:length(N)) {
+  error1[i] = abs(BSmodel(A_price, AMimpcall1[i], TTM1, AMcall1[i], r, "call")
+                 -Binomial_tree(isCall=T, isAmerican=F, AMcall1[i], TTM1, A_price, AMimpcall1[i], r,N[i]))
+}
+error2 = c() #Calculate error
+for (i in 1:length(N)) {
+  error2[i] = abs(BSmodel(A_price, AMimpcall2[i], TTM2, AMcall2[i], r, "call")
+                 -Binomial_tree(isCall=T, isAmerican=F, AMcall2[i], TTM2, A_price, AMimpcall2[i], r,N[i]))
+}
+error3 = c() #Calculate error
+for (i in 1:length(N)) {
+  error3[i] = abs(BSmodel(A_price, AMimpcall3[i], TTM3, AMcall3[i], r, "call")
+                 -Binomial_tree(isCall=T, isAmerican=F, AMcall3[i], TTM3, A_price, AMimpcall3[i], r,N[i]))
+}
+plot(N, error1, type="l", xlab = "N",ylab = "error")
+plot(N, error2, type="l", xlab = "N",ylab = "error")
+plot(N, error3, type="l", xlab = "N",ylab = "error")
+#We can see that as the steps going up, the error will decrease. 
+#However, we still have some fluctuate in the middle steps.
+```
+4.Calculate the American option
+```{r}
+#Implement an additive binomial tree
+N <- 200
+r <- 0.0216 #the risk free rate
+BiAcall1_Am=BiAcall2_Am=BiAcall3_Am=BiAput1_Am=BiAput2_Am=BiAput3_Am=c()
+# first option
+for (i in 1:length(AMcall1)){
+  BiAcall1_Am[i] = Binomial_tree(isCall=T, isAmerican=T, AMcall1[i], TTM1, A_price, AMimpcall1[i], r,N)
+}
+for (i in 1:length(AMput1)){
+  BiAput1_Am[i] = Binomial_tree(isCall=F, isAmerican=T, AMput1[i], TTM1, A_price, AMimput1[i], r,N)
+}
+#Second option
+for (i in 1:length(AMcall2)){
+  BiAcall2_Am[i] = Binomial_tree(isCall=T, isAmerican=T, AMcall2[i], TTM2, A_price, AMimpcall2[i], r,N)
+}
+for (i in 1:length(AMput2)){
+  BiAput2_Am[i] = Binomial_tree(isCall=F, isAmerican=T, AMput2[i], TTM2, A_price, AMimput2[i], r,N)
+}
+#Third option
+for (i in 1:length(AMcall3)){
+  BiAcall3_Am[i] = Binomial_tree(isCall=T, isAmerican=T, AMcall3[i], TTM3, A_price, AMimpcall3[i], r,N)
+}
+for (i in 1:length(AMput3)){
+  BiAput3_Am[i] = Binomial_tree(isCall=F, isAmerican=T, AMput3[i], TTM3, A_price, AMimput3[i], r,N)
+}
+table_call_Am <- data.frame(BiAcall1_Am,BiAcall2_Am,BiAcall3_Am)
+table_put_Am <- data.frame(BiAput1_Am,BiAput2_Am,BiAput3_Am)
+head(table_call_Am)
+head(table_put_Am)
+```
+
+5.Create a table which contains Bid and Ask
+values, Black Scholes price, European and American prices
+```{r}
+# Create Call table
+table_call1 <- data.frame(AM1$calls$Bid[1:20], AM1$calls$Ask[1:20], Acall1, BiAcall1, BiAcall1_Am)
+table_call2 <- data.frame(AM2$calls$Bid[1:20], AM2$calls$Ask[1:20], Acall2, BiAcall2, BiAcall2_Am)
+table_call3 <- data.frame(AM3$calls$Bid[1:20], AM3$calls$Ask[1:20], Acall3, BiAcall3, BiAcall3_Am)
+colnames(table_call1)=colnames(table_call2)=colnames(table_call3)=
+  c("Call Bid", "Call Ask", "Call BS price", "European Call", "American Call")
+table_call_all <- rbind(table_call1,table_call2,table_call3)
+# Create Put table
+table_put1 = data.frame(AM1$puts$Bid[1:20], AM1$puts$Ask[1:20], Aput1, BiAput1, BiAput1_Am)
+table_put2 = data.frame(AM2$puts$Bid[1:20], AM2$puts$Ask[1:20], Aput2, BiAput2, BiAput2_Am)
+table_put3 = data.frame(AM3$puts$Bid[1:20], AM3$puts$Ask[1:20], Aput3, BiAput3, BiAput3_Am)
+colnames(table_put1)=colnames(table_put2)=colnames(table_put3)=
+  c("Put Bid", "Put Ask", "Put BS price", "European Put", "American Put")
+table_put_all <- rbind(table_put1,table_put2,table_put3)
+#Merge in one table
+table_all <- cbind(table_call_all,table_put_all)
+#From the data, the price between BSmodel and Binomial Tree is really close.
+#And the price is all between Bid and Ask.
+#The price is more accurate when time to maturity is closing.
+#And because all the 3 option I choose will expiry less than 31days.
+#The call price between European and American option is same, while some difference in put price. 
+```
+
+6.Compare implied volatility
+```{r}
+#Implement Bisenction&Binomial Tree to find implied volatility for American Options
+impcall1=impcall2=impcall3=imput1=imput2=imput3=c()
+N <- 50
+#First Option
+#Call volatility
+for(i in 1:length(AMcall1)){
+  volc1 <- function(sigma){
+    Binomial_tree(isCall=T, isAmerican=T, AMcall1[i], TTM1, A_price, sigma, r,N)
+    - 0.5 * (AM1$calls$Bid[i] + AM1$calls$Ask[i])
+  }
+  impcall1[i] = bisection(volc1, vrange, 1e-6)}
+#Put volatility
+for(i in 1:length(AMput1)){
+  volp1 = function(sigma){
+    Binomial_tree(isCall=F, isAmerican=T, AMput1[i], TTM1, A_price, sigma, r,N)
+    - 0.5 * (AM1$puts$Bid[i] + AM1$puts$Ask[i])
+  }
+  imput1[i] = bisection(volp1, vrange, 1e-6)}
+# Second Option
+for(i in 1:length(AMcall2)){
+  volc2 <- function(sigma){
+    Binomial_tree(isCall=T, isAmerican=T, AMcall2[i], TTM2, A_price, sigma, r,N)
+    - 0.5 * (AM2$calls$Bid[i] + AM2$calls$Ask[i])
+  }
+  impcall2[i] = bisection(volc2, vrange, 1e-6)}
+for(i in 1:length(AMput2)){
+  volp2 = function(sigma){
+    Binomial_tree(isCall=F, isAmerican=T, AMput2[i], TTM2, A_price, sigma, r,N)
+    - 0.5 * (AM2$puts$Bid[i] + AM2$puts$Ask[i])
+  }
+  imput2[i] = bisection(volp2, vrange, 1e-6)}
+# Third Option
+for(i in 1:length(AMcall3)){
+  volc3 <- function(sigma){
+    Binomial_tree(isCall=T, isAmerican=T, AMcall3[i], TTM3, A_price, sigma, r,N)
+    - 0.5 * (AM3$calls$Bid[i] + AM3$calls$Ask[i])
+  }
+  impcall3[i] = bisection(volc3, vrange, 1e-6)}
+#Put volatility
+for(i in 1:length(AMput3)){
+  volp3 = function(sigma){
+    Binomial_tree(isCall=F, isAmerican=T, AMput3[i], TTM3, A_price, sigma, r,N)
+    - 0.5 * (AM3$puts$Bid[i] + AM3$puts$Ask[i])
+  }
+  imput3[i] = bisection(volp3, vrange, 1e-6)}
+
+#compare implied Vol by BS model and Binomial Tree model
+
+#Call Implied Vol
+table_call_BSBI <- data.frame(AMimpcall1,impcall1,AMimpcall2,impcall2,AMimpcall3,impcall3)
+colnames(table_call_BSBI) <- c("BS Call1", "BiTree Call1", "BS Call2","BiTree Call2","BS Call3","BiTree Call3")
+table_put_BSBI = data.frame(AMimput1,imput1,AMimput2,imput2,AMimput3,imput3)
+colnames(table_put_BSBI) = c("BS Put1", "BiTree Put1","BS Put2", "BiTree Put2","BS Put3", "BiTree Put3")
+table_call_BSBI#Call vol
+table_put_BSBI#Put vol
+#From Observation, for call volatility by the 2 models are very close.
+#However, for put volatility, the Binomial Tree model provide more smaller volatility.
+#I guess the reason is that the Binomial Tree is less sensitive to volatility.
+```
+7.Implement a trinomial tree to price an American Put option
+```{r}
+#Implement a trinomial tree
+Trinomial_tree <- function(isCall,isAmerican,S0,K,Tm,sig,r,div,N){
+  #Precompute constants
+  dt <- Tm/N
+  dx <- sig*sqrt(3*dt)
+  nu <- r - div - 0.5*sig^2
+  edx <- exp(dx)
+  pu <- 0.5*((sig^2*dt+nu^2*dt^2)/(dx^2)+nu*dt/dx)
+  pd <- 0.5*((sig^2*dt+nu^2*dt^2)/(dx^2)-nu*dt/dx)
+  pm <- 1 - pu - pd
+  disc <- exp(-r*dt)
+  #Call-Put Flag
+  cp <- ifelse(isCall, 1, -1)
+  #initialize asset prices 
+  S_mat <- matrix(ncol=2*N+1,nrow=N+1)
+  S_mat[1,N+1]<-S0
+  for (i in 1:N) {
+    S_mat[i+1,(N+1-i):(N+1+i)]<- S0*(exp(((-i:i)*dx)))
+  }
+  #initialize option values
+  V_mat <- matrix(ncol=2*N+1,nrow=N+1)
+  V_mat[N+1,] <- pmax(cp*(S_mat[N+1,]-K),0)
+  #step back through the tree
+  for(i in N:1){
+    V_mat[i,(N-i+2):(i+N)]<-disc*(pu*V_mat[i+1,(N-i+3):(i+N+1)]
+                                  +pm*V_mat[i+1,(N-i+2):(i+N)]
+                                  +pd*V_mat[i+1,(N-i+1):(i+N-1)])
+    if(isAmerican){
+      V_mat[i,(N-i+2):(i+N)] <- max(V_mat[i,(N-i+2):(i+N)],
+                                    cp*(S_mat[i,(N-i+2):(i+N)]-K))
+    }
+    }
+  return(Price=V_mat[1,N+1])
+}
+#Price an American Put option
+#Given the data
+N <- 3
+r <- 0.0216 #the risk free rate
+div <- 0
+TriAput1_Am <- c()
+for (i in 1:length(AMput1)){
+  TriAput1_Am[i] = Trinomial_tree(isCall=F, isAmerican=F, A_price, AMput1[i], TTM1, AMimput1[i], r,div,N)
+}
+mytable <- cbind(TriAput1_Am,BiAput1_Am)
+mytable#Compare with Binomial model
+```
+
+
+
+
+
+
+
+Problem 2.Adapting the Binomial tree to time varying coefficients
+```{r}
+#1
+f1 <- function(x){
+  0.05*(1+0.01*x)
+}
+f2 <- function(x){
+  0.3*(1+0.005*x)
+}
+#Set coefficients
+i <- seq(0,11,1)
+r <- sapply(i,f1)
+sig <- sapply(i,f2)
+v <- r-sig^2/2
+dx <- 0.05 #choose dx
+
+#Calculate delat_t,delta_p,and probabilities
+dt <- (-sig^2+sqrt(sig^4+4*v^2*dx^2))/(2*v^2)
+p <- 1/2+v*dt/(2*dx)
+mytable <- cbind(i,r,sig,v,dt,p)
+mytable
+#2.
+f3 <- function(x){
+    sum((-sig[1:2]^2+sqrt(sig[1:2]^4+4*v[1:2]^2*x^2))/(2*v[1:2]^2))-0.5
+}
+dx <- bisection(f3,vrange, 1e-6)#Apply the bisection method
+dx#determine the optimal value of dx
+#3.
+Binomial_tree(isCall=T, isAmerican=F, 10, 0.5, 10, mean(sig), mean(r),
+                          N=11)
+Binomial_tree(isCall=F, isAmerican=F, 10, 0.5, 10, mean(sig), mean(r),
+                          N=11)
+#So the call option price is 1.0112 and put option price is 0.7518
+```
+Problem 3.Dealing with discrete cash dividends
+For this problem I used the model provided on book "Implementing Derivative Models".
+```{r}
+#Price call and put option
+#Given the data provided
+r <- 0.001
+sig <- 0.4
+S0 <- 100
+K <- 90
+Tm <- 4/24
+div <- 0.6
+Tau <- 1/24
+
+#Since the delta_t is constants, and T=4/24, Tau=1/24,
+#Obviously we should construct a tree with steps N=4.
+#And the dividends is paid at node(1,0);(1,1)
+Tau_Step <- 1 #The step that the dividends is paid
+Binomial_tree1 <- function(isCall, isAmerican, K, Tm, S0, sig, r,
+                          N=4)
+  {
+  #Precompute constants
+  dt <-  Tm/N
+  v <-  r-0.5*sig^2
+  u <-  sqrt(sig^2*dt+(v*dt)^2) #dxu
+  d <- -u
+  p <- 0.5+0.5*(v*dt/u) #probability
+  disc <- exp(-r*dt) #discount factor
+  dpu <- disc*p
+  dpd <- disc*(1-p)
+  edxud <- exp(2*u)
+  edxd <- exp(-1*u)
+  M <- N+1
+  cp <- ifelse(isCall, 1, -1) #factor cp with 1 or -1
+  
+  #Intialize asset prices
+  V = S = matrix(0, nrow = M, ncol = M, dimnames = list(
+    paste("State", 1:(N+1), sep = ""), paste("T=",0:N, sep = "")))
+  S[M,M] <- (S0-div*exp(-r*Tau))*exp(N*d)
+  for (i in M:2) {
+    S[i-1,M] <- S[i,M]*edxud
+  }
+  for (j in M:2) {
+    S[1,j-1] <- S[1,j]/exp(u)
+    for (i in M:2) {
+      S[i-1,j-1] <- S[i,j]/exp(d)
+    }
+  }
+  S[Tau_Step,Tau_Step] <- S[Tau_Step,Tau_Step+1]/exp(u)+div*exp(-r*(Tau-Tau)) #Add dividend on stock
+  
+  
+  #Intialize option values at maturity
+  for (j in 1:M) {
+    V[M-j+1,M] <- max(0, cp*(S[M-j+1,M]-K))
+  }
+  
+  #Step backwards through the tree
+  for (j in (M-1):1) {
+    for (i in 1:j) {
+      V[i,j] <- disc*(p*V[i,j+1]+(1-p)*V[i+1,j+1])
+      if(isAmerican){
+        V[i,j] <- max(V[i,j],cp*(S[i,j]-K))
+      }
+    }
+  }
+  #Return the price
+  return(V[1,1])
+}
+Call_Option_Price <- Binomial_tree1(isCall=T, isAmerican=T, K, Tm, S0, sig, r,N=4)
+Put_Option_Price <- Binomial_tree1(isCall=F, isAmerican=T, K, Tm, S0, sig, r,N=4)
+Results <- cbind(Call_Option_Price,Put_Option_Price)
+Results #The Price of derivatives
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
